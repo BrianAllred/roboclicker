@@ -1,47 +1,18 @@
 version: 2
 jobs:
-  build_linux:
+  build:
     docker:
       - image: therecipe/qt:linux
-    working_directory: /home/user/work/src/github.com/BrianAllred/roboclicker
+    working_directory: /home/user/work
     steps:
-      - checkout
-      - run: go get -v -t -d ./...
+      - run:
+          name: Install dependencies
+          command: |
+            apt-get -qq update && apt-get -qq -y install libx11-dev xorg-dev libxtst-dev libpng++-dev xcb libxcb-xkb-dev x11-xkb-utils libx11-xcb-dev libxkbcommon-x11-dev libxkbcommon-dev xsel xclip
+      - run: go get -v -d github.com/BrianAllred/roboclicker
       - run:
           name: Build
           command: |
-            qtdeploy build linux
+            cd src/github.com/BrianAllred/roboclicker && qtdeploy build linux
       - store_artifacts:
-          path: src/roboclicker/deploy/linux
-  build_win32:
-    docker:
-      - image: therecipe/qt:windows_32_static
-    working_directory: /home/user/work/src/github.com/BrianAllred/roboclicker
-    steps:
-      - checkout
-      - run: go get -v -t -d ./...
-      - run:
-          name: Build
-          command: |
-            qtdeploy build windows_32_static
-      - store_artifacts:
-          path: src/roboclicker/deploy/windows
-  build_win64:
-    docker:
-      - image: therecipe/qt:windows_64_static
-    working_directory: /home/user/work/src/github.com/BrianAllred/roboclicker
-    steps:
-      - checkout
-      - run: go get -v -t -d ./...
-      - run:
-          name: Build
-          command: |
-            qtdeploy build windows_64_static
-      - store_artifacts:
-          path: src/roboclicker/deploy/windows
-workflows:
-  version: 2
-  linux_and_windows:
-    - build_linux
-    - build_win32
-    - build_win64
+          path: src/github.com/BrianAllred/roboclicker/deploy/linux
