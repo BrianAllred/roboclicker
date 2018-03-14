@@ -1,0 +1,47 @@
+version: 2
+jobs:
+  build_linux:
+    docker:
+      - image: therecipe/qt:linux
+    working_directory: /home/user/work/src/github.com/BrianAllred/roboclicker
+    steps:
+      - checkout
+      - run: go get -v -t -d ./...
+      - run:
+          name: Build
+          command: |
+            qtdeploy build linux
+      - store_artifacts:
+          path: src/roboclicker/deploy/linux
+  build_win32:
+    docker:
+      - image: therecipe/qt:windows_32_static
+    working_directory: /home/user/work/src/github.com/BrianAllred/roboclicker
+    steps:
+      - checkout
+      - run: go get -v -t -d ./...
+      - run:
+          name: Build
+          command: |
+            qtdeploy build windows_32_static
+      - store_artifacts:
+          path: src/roboclicker/deploy/windows
+  build_win64:
+    docker:
+      - image: therecipe/qt:windows_64_static
+    working_directory: /home/user/work/src/github.com/BrianAllred/roboclicker
+    steps:
+      - checkout
+      - run: go get -v -t -d ./...
+      - run:
+          name: Build
+          command: |
+            qtdeploy build windows_64_static
+      - store_artifacts:
+          path: src/roboclicker/deploy/windows
+workflows:
+  version: 2
+  linux_and_windows:
+    - build_linux
+    - build_win32
+    - build_win64
