@@ -4,25 +4,23 @@ import (
 	"os"
 	"runtime"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/therecipe/qt/gui"
 
-	"github.com/go-vgo/robotgo"
 	"github.com/matryer/runner"
 	"github.com/therecipe/qt/widgets"
 )
 
-type mButton int
+type mButton byte
 
 const (
 	mButtonLeft   mButton = mButton(0)
-	mButtonRight  mButton = mButton(1)
-	mButtonMiddle mButton = mButton(2)
+	mButtonMiddle mButton = mButton(1)
+	mButtonRight  mButton = mButton(2)
 )
 
-type mClick int
+type mClick byte
 
 const (
 	mClickSingle mClick = mClick(0)
@@ -69,8 +67,6 @@ var interval time.Duration
 var mouseButton mButton
 var clickType mClick
 var xPos, yPos, repeat int
-var stopKeyLog, stopListen chan struct{}
-var wg sync.WaitGroup
 
 func main() {
 	switch runtime.GOOS {
@@ -98,7 +94,7 @@ func main() {
 	intervalGroup.SetLayout(intervalLayout)
 
 	// Click options section
-	clickMouseButtonComboBox.AddItems([]string{"Left", "Right", "Middle"})
+	clickMouseButtonComboBox.AddItems([]string{"Left", "Middle", "Right"})
 	clickClickTypeComboBox.AddItems([]string{"Single", "Double"})
 
 	clickOptsLayout.AddWidget(clickMouseButtonLabel, 0, 0, 0)
@@ -118,10 +114,10 @@ func main() {
 	clickRepeatGroup.SetLayout(clickRepeatLayout)
 
 	// Cursor position section
-	screenXMax, screenYMax := robotgo.GetScreenSize()
-	cursorLocXEdit.SetValidator(gui.NewQIntValidator2(0, screenXMax, cursorLocXEdit))
+	screenXMin, screenYMin, screenXMax, screenYMax := getScreenSize()
+	cursorLocXEdit.SetValidator(gui.NewQIntValidator2(screenXMin, screenXMax, cursorLocXEdit))
 	cursorLocXEdit.SetPlaceholderText("X")
-	cursorLocYEdit.SetValidator(gui.NewQIntValidator2(0, screenYMax, cursorLocYEdit))
+	cursorLocYEdit.SetValidator(gui.NewQIntValidator2(screenYMin, screenYMax, cursorLocYEdit))
 	cursorLocYEdit.SetPlaceholderText("Y")
 	cursorCurrentLocRadio.SetChecked(true)
 
@@ -150,7 +146,7 @@ func main() {
 
 	// Setup button events
 	cursorPickLocButton.ConnectClicked(func(checked bool) {
-		go pickLocation()
+		go startPickLocation()
 	})
 
 	startButton.ConnectClicked(func(checked bool) {
@@ -163,32 +159,18 @@ func main() {
 
 	window.Show()
 
-	stopListen = make(chan struct{})
-	go listenForStartStop(stopListen)
+	go listenForStartStop()
 
 	widgets.QApplication_Exec()
 }
 
-func keylog(keyPress chan int, done <-chan struct{}, key string) {
-	select {
-	case keyPress <- robotgo.AddEvent(key):
-	case <-stopKeyLog:
-		keyPress <- 1
-	}
+func listenForStartStop() {
+	startKeybind("listenForStartStop", "f6", func(key string) {
+		toggleAutoClick()
+	})
 }
 
-func pickLocation() {
-	defer func() {
-		stopListen = make(chan struct{})
-		go listenForStartStop(stopListen)
-	}()
-
-	close(stopListen)
-
-	wg.Wait()
-
-	time.Sleep(10 * time.Millisecond)
-
+func startPickLocation() {
 	cursorPickLocButton.SetEnabled(false)
 	startButton.SetEnabled(false)
 	cursorPickLocRadio.SetChecked(true)
@@ -196,30 +178,25 @@ func pickLocation() {
 
 	time.Sleep(10 * time.Millisecond)
 
-	loop := true
+	startKeybind("pickLocation", "escape", func(key string) {
+		stopPickLocation()
+	})
 
-	escChan := make(chan int)
-	stopKeyLog = make(chan struct{})
-	go keylog(escChan, stopKeyLog, "esc")
-
-	for loop {
-		x, y := robotgo.GetMousePos()
-
-		time.Sleep(100 * time.Millisecond)
-
-		cursorLocXEdit.SetText(strconv.Itoa(x))
-		cursorLocYEdit.SetText(strconv.Itoa(y))
-
-		time.Sleep(10 * time.Millisecond)
-
-		select {
-		case key := <-escChan:
-			if key == 0 {
-				loop = false
-			}
-		default:
+	updating := false
+	startMouseMotionBind("pickLocation", func(x int, y int) {
+		if !updating {
+			updating = true
+			cursorLocXEdit.SetText(strconv.Itoa(x))
+			cursorLocYEdit.SetText(strconv.Itoa(y))
+			time.Sleep(10 * time.Millisecond)
+			updating = false
 		}
-	}
+	})
+}
+
+func stopPickLocation() {
+	stopKeybind("pickLocation")
+	stopMousebind("pickLocation")
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -227,37 +204,10 @@ func pickLocation() {
 	startButton.SetEnabled(true)
 	cursorPickLocButton.SetText("Pick location")
 
+	xPos, _ = strconv.Atoi(cursorLocXEdit.Text())
+	yPos, _ = strconv.Atoi(cursorLocYEdit.Text())
+
 	time.Sleep(10 * time.Millisecond)
-}
-
-func listenForStartStop(done <-chan struct{}) {
-	defer wg.Done()
-
-	wg.Add(1)
-
-	f6Chan := make(chan int)
-	stopKeyLog = make(chan struct{})
-	go keylog(f6Chan, stopKeyLog, "f6")
-
-	loop := true
-
-	for loop {
-		time.Sleep(100 * time.Millisecond)
-
-		select {
-		case key := <-f6Chan:
-			if key == 0 {
-				go toggleAutoClick()
-				f6Chan = make(chan int)
-				go keylog(f6Chan, stopKeyLog, "f6")
-			}
-		case <-done:
-			loop = false
-			close(stopKeyLog)
-			robotgo.StopEvent()
-		default:
-		}
-	}
 }
 
 func toggleAutoClick() {
@@ -280,7 +230,7 @@ func startAutoClick() {
 		clickType = mClick(clickClickTypeComboBox.CurrentIndex())
 
 		if cursorCurrentLocRadio.IsChecked() {
-			xPos, yPos = robotgo.GetMousePos()
+			xPos, yPos = getMousePos()
 		} else {
 			xPos, _ = strconv.Atoi(cursorLocXEdit.Text())
 			yPos, _ = strconv.Atoi(cursorLocYEdit.Text())
@@ -313,30 +263,16 @@ func stopAutoClick() {
 }
 
 func autoClick(shouldStop runner.S) error {
-	var mouseButtonStr string
-	var doubleClick bool
-
 	count := 0
 
 	for {
 		if cursorCurrentLocRadio.IsChecked() {
-			xPos, yPos = robotgo.GetMousePos()
+			xPos, yPos = getMousePos()
 		} else {
-			robotgo.MoveMouse(xPos, yPos)
+			moveMouse(xPos, yPos)
 		}
 
-		switch mouseButton {
-		case mButtonLeft:
-			mouseButtonStr = "left"
-		case mButtonRight:
-			mouseButtonStr = "right"
-		case mButtonMiddle:
-			mouseButtonStr = "center"
-		}
-
-		doubleClick = clickType == mClickDouble
-
-		robotgo.MouseClick(mouseButtonStr, doubleClick)
+		go mouseClick(xPos, yPos, mouseButton, clickType)
 
 		if repeat > 0 {
 			count++
@@ -350,7 +286,6 @@ func autoClick(shouldStop runner.S) error {
 			break
 		}
 
-		// move to goroutine
 		time.Sleep(interval)
 	}
 
@@ -402,4 +337,8 @@ func validateInterval() bool {
 	}
 
 	return true
+}
+
+func taskRunning(task *runner.Task) bool {
+	return task != nil && task.Running()
 }
